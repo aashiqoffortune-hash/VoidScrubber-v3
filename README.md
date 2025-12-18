@@ -1,263 +1,138 @@
-# RepoCleaner v3
+# RepoCleaner v3 — ShadowVault Optimizer 🔎🛡️
 
-> **Strip embedded tool references from code exports in seconds.** Remove Lovable badges, watermarks, and metadata automatically while preserving your code integrity.
-
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-
-## 🎯 What It Does
-
-RepoCleaner scans your project for traces of code generation tools (like Lovable, Vercel, etc.) and removes them safely:
-
-- **Detects & Removes**: Watermarks, badges, comments, metadata, and tool-specific references
-- **Preserves Code**: Maintains all functional code while cleaning only cosmetic traces
-- **Zero Dependencies**: Uses Python stdlib only—no installation overhead
-- **Production Ready**: Handles monorepos with 40K+ files in minutes
-
-### Supported File Types
-HTML, JavaScript, TypeScript, JSX, TSX, CSS, Markdown, JSON, SVG, YAML, TOML, and config files.
+**RepoCleaner v3** (a.k.a. ShadowVault Optimizer) is a lightweight, single-file Python tool to scan repositories for tool-generated traces (watermarks, badges, metadata, and common secret patterns) and remove them safely while preserving functional code and repo integrity.
 
 ---
 
-## ⚡ Quick Start
+## ✨ Key Capabilities
 
-### Installation
+- Detects and removes watermarks and traces (Lovable, Copilot, GPT, Cursor, Replit, etc.)
+- Scans common text file types: `.html`, `.js`, `.jsx`, `.ts`, `.tsx`, `.css`, `.md`, `.mdx`, `.json`, `.svg`, `.yaml`, `.yml`, `.toml`, `.config`, `.txt`
+- Performs security checks (Bandit for Python and `npm audit` for JS projects)
+- Safe operation modes: **dry-run**, **backups**, **atomic writes**, and **git-friendly commits**
+- Optional obfuscation/minification for JS and CSS (requires `uglify-js` / `clean-css-cli` via npm)
+- Custom pattern support via JSON pattern file
+
+---
+
+## 🚀 Quick Start
+
+Requirements:
+- Python 3.8+
+- Optional: `git`, `npm` (for JS audits and obfuscation tools)
+
+Download or clone this repo and run from the target project root:
 
 ```bash
-# Save the script to your project
-curl -O https://raw.githubusercontent.com/aashiqoffortune-hash/RepoCleaner-v3/main/repo_cleaner.py
-# Or download and place manually
-chmod +x repo_cleaner.py
-```
-
-**Requirements**: Python 3.8 or higher. No additional packages needed.
-
-### Basic Usage
-
-Run from your project root:
-
-```bash
-# Preview changes without modifying files
+# Preview changes (DRY-RUN): see what would be changed
 python3 repo_cleaner.py --dry-run --verbose
 
-# Apply cleaning
-python3 repo_cleaner.py --mutate --backup
+# Run actual cleanup with backup and auto-commit (safe default if not dry-run)
+python3 repo_cleaner.py --backup --commit --verbose
 ```
+
+Notes:
+- `--dry-run` will only report changes and will not write files.
+- `--backup` creates a timestamped ZIP archive of the repository before modification.
+- `--commit` will stage, commit, and attempt to push changes (uses random decoy committer identity by default).
 
 ---
 
-## 🔧 Features
+## 🧭 Options & Flags
 
-### 1. **Dry-Run Preview**
-See what will be removed without touching your files:
+Use `python3 repo_cleaner.py --help` for a full list. Common flags include:
+
+- `--dry-run, -d`         Preview changes without applying them
+- `--commit, -c`          Auto-commit & push changes (respects `--dry-run`)
+- `--bundle, -b`          Create a ZIP bundle after processing
+- `--backup`              Make a secure backup before any modifications
+- `--verbose, -v`         Increase log verbosity
+- `--new-dir, -n DIR`     Copy processed repository to `DIR` instead of modifying in place
+- `--log-file, -l FILE`   Save a JSON log of all changes
+- `--eta`                 Show ETA during processing
+- `--obfuscate, -o`       Attempt to minify JS/CSS (requires npm tools)
+- `--vuln-scan, -s`       Run vulnerability scans (Bandit / npm audit)
+- `--auto-patch, -a`      Attempt auto-fix for found vulns (when supported)
+- `--pattern-file FILE`   Load custom JSON patterns (format: {"patterns": ["regex1","regex2"]})
+
+---
+
+## ✅ Safety & Guarantees
+
+- All file writes are done atomically to prevent partial writes.
+- Backups are created (when requested) so you can restore state.
+- Binary files and unsupported extensions are skipped automatically.
+- The tool attempts to preserve syntax and avoid modifications likely to break code (e.g., does not minify TypeScript by default).
+
+---
+
+## 🔎 How Detection Works
+
+- The tool ships a prioritized list of regex patterns (Lovable watermarks first, other AI traces, then secret-like patterns).
+- `detailed_scan()` records exact file/line locations and returns types detected.
+- `clean_file()` removes matches using atomic write, logs changes, and optionally runs minification for JS/CSS when `--obfuscate` is enabled.
+
+---
+
+## 🧪 Testing
+
+A small pytest suite is included to validate pattern loading, cleaning behavior, and core helpers. To run tests:
 
 ```bash
-python3 repo_cleaner.py --dry-run --verbose
+# Ensure pytest is available, then run:
+python3 repo_cleaner.py --test
+# or
+pytest -q
 ```
 
-**Example Output:**
-```
-Initializing on /your-project...
-Scanning for Lovable references...
---- DRY-RUN: 12 references across 2,340 files ---
-File index.html: 3 references removed
-File package.json: 1 reference removed
-File src/App.tsx: 2 references removed
-...
-Estimated file size reduction: 15.2 KB
-```
-
-### 2. **Safe Cleaning with Backups**
-```bash
-python3 repo_cleaner.py --mutate --backup --verbose
-```
-
-- `--backup`: Creates timestamped ZIP of original files
-- `--mutate`: Adds subtle neutral tweaks (10% chance per file) for natural appearance
-- `--verbose`: Detailed progress reporting
-
-### 3. **Git Integration**
-```bash
-python3 repo_cleaner.py --commit --push
-```
-
-- `--commit`: Auto-creates a git commit with neutral message
-- `--push`: Automatically pushes to remote
-- Messages appear like routine refactoring: `"refactor: cleanup (742)"`
-
-### 4. **Bundle & Export**
-```bash
-python3 repo_cleaner.py --bundle --new-dir clean_export
-```
-
-- `--bundle`: Zips cleaned repo as `project_clean_TIMESTAMP.zip`
-- `--new-dir`: Exports to specified directory instead of modifying in-place
-
-### 5. **Logging & Diagnostics**
-```bash
-python3 repo_cleaner.py --log-file report.json --eta
-```
-
-- `--log-file`: JSON report of all changes
-- `--eta`: Shows time estimate before starting
-- `--daemon`: Run as background process
+Note: The script auto-installs `pytest` if invoked via `--test` and not present (may require network access).
 
 ---
 
-## 📋 Complete Command Reference
+## 🛠️ Examples
+
+Preview and log changes:
 
 ```bash
-python3 repo_cleaner.py [OPTIONS] [PATH]
-
-OPTIONS:
-  --dry-run              Preview changes without modifying files
-  --mutate               Add subtle neutral tweaks for natural appearance
-  --backup               Create timestamped backup ZIP
-  --commit               Auto-create git commit
-  --push                 Auto-push to remote after commit
-  --bundle               Create ZIP of cleaned repo
-  --new-dir DIR          Export to directory instead of in-place
-  --verbose              Detailed progress output
-  --log-file FILE        Write JSON report of changes
-  --eta                  Show time estimate
-  --daemon               Run as background process
-  --obfuscate            Obfuscate remaining tool references
-  --help, -h             Show help message
-
-EXAMPLES:
-  # Preview what will be removed
-  python3 repo_cleaner.py . --dry-run --verbose
-  
-  # Clean with backup and git commit
-  python3 repo_cleaner.py /path/to/repo --mutate --backup --commit
-  
-  # Export clean version to new directory
-  python3 repo_cleaner.py . --bundle --new-dir ./clean-export
-  
-  # Full audit trail
-  python3 repo_cleaner.py . --verbose --log-file audit.json --dry-run
+python3 repo_cleaner.py . --dry-run --verbose --log-file changes.json
 ```
 
----
+Full cleanup with backup and vulnerability scan:
 
-## ✅ What Gets Removed
-
-RepoCleaner detects and removes:
-
-- ✓ "Generated by Lovable" comments
-- ✓ Lovable badge IDs and classes
-- ✓ SVG/PNG image references to Lovable
-- ✓ Tool-specific metadata in JSON
-- ✓ Watermarks in code comments
-- ✓ Framework-specific hooks (useLovableEdit, etc.)
-- ✓ Any powered-by or made-with references
-
-**And preserves:**
-- ✓ All functional code and logic
-- ✓ CSS styling and structure
-- ✓ Configuration values
-- ✓ Project structure and assets
-
----
-
-## 🛡️ Safety Features
-
-- **Dry-run mode** to preview changes first
-- **Automatic backups** before modifications
-- **Git integration** for version control
-- **File encoding detection** to prevent corruption
-- **Binary file detection** to skip non-text files
-- **Rollback capability** via git history
-
----
-
-## 📊 Performance
-
-- **Small projects** (< 1K files): < 5 seconds
-- **Medium projects** (1-10K files): 10-30 seconds
-- **Large monorepos** (40K+ files): 2-5 minutes
-
-All operations are single-threaded but optimized for I/O efficiency.
-
----
-
-## 🐛 Troubleshooting
-
-### "Permission denied" error
 ```bash
-chmod +x repo_cleaner.py
+python3 repo_cleaner.py /path/to/repo --backup --commit --vuln-scan --auto-patch --verbose
 ```
 
-### Nothing found to clean
-The script only processes known file types. Check that:
-- Your files have proper extensions (.html, .js, .json, etc.)
-- Lovable references aren't in binary or compressed files
-- Use `--verbose` to see all scanned files
+Export cleaned repo to a new folder:
 
-### Git commit fails
-Ensure:
-- You're in a git repository (`git init` if needed)
-- Git is configured: `git config user.name` and `git config user.email`
-- Repository has changes to commit
-
----
-
-## 💡 Use Cases
-
-- **Export Cleanup**: Remove tool traces from AI-generated or template-based projects
-- **Production Deploy**: Strip watermarks before publishing
-- **Open Sourcing**: Clean up all tool references before releasing publicly
-- **Migration**: Move away from a tool platform cleanly
-- **Archive**: Preserve clean versions of project exports
-
----
-
-## 📄 License
-
-MIT License — Use freely in personal and commercial projects.
-
----
-
-## 🤝 Contributing
-
-Found a bug or have a suggestion? Issues and PRs welcome!
-
----
-
-**Made with ❤️ for developers who want clean code exports.**
-- `--verbose`: Progress every 500 files + per-file details.
-- `--new-dir clean_fork`: Cleans into `./clean_fork` (original safe).
-- `--eta`: Runtime estimates/summary.
-- `--log-file purge_log.json`: JSON export of changes.
-
-**Output Example:**
-
-```
-Initializing on /your-project...
-Scanning for Lovable references...
-✓ Backup: your-project_backup_20251218_143022_4567.zip
-  - Progress: 600/1,200 (50.0%) ETA: 0m 15s
-✓ Cleaned README.md (2 refs)
-  - Hit in README.md (pre: 1,250 chars)
-  - Post: 1,205 chars (delta: 45)
-...
-✓ Committed: refactor: cleanup optimizations (742)
-  - Git staged and pushed
-✓ Cloned to: clean_fork
-✓ Bundled: clean_fork_clean_742.zip
---- COMPLETE: 3 references removed across 1,200 files. Time: 45.2s ---
-  - Summary: 1,200 files, 3 matches culled.
-Log saved: purge_log.json
+```bash
+python3 repo_cleaner.py . --new-dir ../clean-export --bundle
 ```
 
-### 3. Advanced
+---
 
-- **Subfolder**: `--path ./src` (scan `./src` only).
-- **Batch**: Use `horde_purge.sh` (chmod +x): `./horde_purge.sh` for multiple folders.
-- **Minimal**: `python3 repo_cleaner.py --dry-run --path .` for quick scans.
+## ⚠️ Limitations & Notes
 
-## Tips
+- The tool is focused on text-based traces; it does not attempt to analyze binary blobs, archives, or externally hosted assets.
+- Minification/obfuscation is best-effort and requires external npm tools; failures are non-fatal and logged.
+- Be cautious with `--commit` and `--push` on sensitive or production branches — prefer running on a clone or feature branch first.
 
-- **Test**: Dry-run on a clone (`git clone . test-clone; cd test-clone`).
-- **Undo**: Unzip backup + `git reset --hard HEAD~1`.
-- **Speed**: For large repos, the sentinel skips if clean.
+---
+
+## Contributing
+
+Contributions are welcome:
+- Open an issue if you find a false positive/negative or want new detection patterns added.
+- Submit PRs to add patterns, tune behavior, or improve tests.
+
+Please include test cases for detection tweaks.
+
+---
+
+## License
+
+This project is distributed under the MIT License — see the `LICENSE` file for details.
+
+---
+
+If you want a custom README tweak (more examples, different tone, or additional badges), tell me the preferred style and I will update it. 
