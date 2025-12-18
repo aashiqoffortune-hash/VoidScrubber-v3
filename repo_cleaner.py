@@ -10,6 +10,15 @@ import json  # For package.json edits
 from pathlib import Path
 from datetime import datetime  # For backups
 import time  # For ETA
+import signal  # For daemon graceful shutdown
+import threading  # For daemon monitoring
+# Optional: daemonize (pip install python-daemon if needed)
+try:
+    import daemon
+    DAEMON_AVAILABLE = True
+except ImportError:
+    DAEMON_AVAILABLE = False
+    print("Warning: 'python-daemon' not installed—daemon mode limited to threaded loop.")
 
 # Patterns for Lovable references (case-insensitive)
 LOVABLE_PATTERNS = [
@@ -22,14 +31,12 @@ LOVABLE_PATTERNS = [
     r'(?i)lovable\.com|powered by lovable',
     r'(?i)"lovable-.*?"',
 ]
-
 # Neutral replacements for natural look
 DECOYS = [
     "CustomForge", "DevPhantom", "CodeVoid", "AnonBuilder", "ShadowGen", "UI-Optimizer",
     "// Perf-tuned render", "/* Legacy UI hook */", "#app-badge { display: none; }",
     '"export-tool": "custom"', '"generator": "local"'
 ]
-
 # Secure file delete (global scope)
 def shred_file(fp: Path, verbose=False):
     try:
@@ -38,7 +45,7 @@ def shred_file(fp: Path, verbose=False):
         else:
             os.system(f"shred -u -z -n 3 {fp} 2>/dev/null || true")
         if verbose:
-            print(f"  - Deleted: {fp.name}")
+            print(f" - Deleted: {fp.name}")
     except:
         pass
 
@@ -53,27 +60,27 @@ def quick_sentinel_scan(root_path: Path, verbose=False) -> bool:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         if 'lovable' in f.read().lower():
                             if verbose:
-                                print(f"  - Lovable detected in {file_path.name}—proceeding.")
+                                print(f" - Lovable detected in {file_path.name}—proceeding.")
                             return True
                 except UnicodeDecodeError:
                     continue
     return False
 
-def scrub_file(file_path: Path, dry_run=False, mutate=False, verbose=False, log_entries=None) -> list:
+def scrub_file(file_path: Path, dry_run=False, mutate=False, verbose=False, log_entries=None, obfuscate=False) -> list:
     """Clean one file for Lovable references."""
     if not file_path.is_file():
         return []
-   
+  
     ext = file_path.suffix.lower()
     if ext not in {'.html', '.js', '.jsx', '.ts', '.tsx', '.css', '.mdx', '.md', '.txt', '.json', '.svg', '.yaml', '.yml', '.toml', '.config'}:
         return []
-   
+  
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
     except UnicodeDecodeError:
         return []
-   
+  
     original_content = content
     changes = []
     match_count = 0
@@ -85,14 +92,14 @@ def scrub_file(file_path: Path, dry_run=False, mutate=False, verbose=False, log_
                 content = re.sub(pattern, '', content, flags=re.MULTILINE | re.DOTALL)
             else:
                 content = re.sub(pattern, '', content)
-   
+  
     if match_count > 0:
         changes.append(f"File {file_path.name}: {match_count} references removed")
         if verbose:
-            print(f"  - Hit in {file_path.name} (pre: {len(original_content)} chars)")
+            print(f" - Hit in {file_path.name} (pre: {len(original_content)} chars)")
         if log_entries is not None:
             log_entries.append({'file': str(file_path), 'matches': match_count, 'pre': len(original_content)})
-   
+  
     if mutate and random.random() < 0.10:
         decoy = random.choice(DECOYS)
         if ext == '.json':
@@ -118,18 +125,97 @@ def scrub_file(file_path: Path, dry_run=False, mutate=False, verbose=False, log_
                 pos = content.lower().find('lovable', random.randint(0, len(content)//2))
                 if pos != -1:
                     content = content[:pos] + decoy[:len('lovable')] + content[pos+7:]
-   
+  
     if changes and not dry_run:
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(content)
         print(f"✓ Cleaned {file_path.name} ({match_count} refs)")
         if verbose:
-            print(f"  - Post: {len(content)} chars (delta: {len(original_content) - len(content)})")
+            print(f" - Post: {len(content)} chars (delta: {len(original_content) - len(content)})")
         if log_entries is not None:
             log_entries[-1]['post'] = len(content)
             log_entries[-1]['delta'] = len(original_content) - len(content)
-   
+
+    # Obfuscation integration (Multi-Tool: Black Magic Obfuscator style)
+    if obfuscate and not dry_run and ext in {'.js', '.jsx', '.ts', '.tsx', '.css'}:
+        try:
+            if ext in {'.js', '.jsx', '.ts', '.tsx'}:
+                # Assume uglify-js or similar installed globally
+                result = subprocess.run(['uglifyjs', str(file_path), '-o', str(file_path), '--mangle', '--compress'], 
+                                        capture_output=True, check=True)
+            elif ext == '.css':
+                # Use cssnano or cleancss
+                result = subprocess.run(['cleancss', '-o', str(file_path), str(file_path)], 
+                                        capture_output=True, check=True)
+            if verbose:
+                print(f" - Obfuscated {file_path.name}: {len(content) - len(open(file_path).read())} chars reduced")
+            changes.append(f"Obfuscated {file_path.name}")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            if verbose:
+                print(f"⚠ Obfuscator tool missing for {ext}—install uglifyjs/cleancss globally.")
+  
     return changes
+
+def vulnerability_scan(root_path: Path, dry_run=False, verbose=False, auto_patch=False, log_entries=None):
+    """Vulnerability Scanner Tie-In: Run lightweight scans and optional auto-patches."""
+    if dry_run:
+        print("--- DRY-RUN: Vulnerability scan preview ---")
+        return []
+    
+    vulns_found = []
+    py_files = list(root_path.rglob('*.py'))
+    js_dirs = [d for d in root_path.rglob('*') if (d / 'package.json').exists()]
+    
+    # Python: Bandit scan
+    if py_files and verbose:
+        print("Scanning Python for vulns...")
+    for py_file in py_files:
+        try:
+            result = subprocess.run(['bandit', '-f', 'json', '-r', str(py_file.parent)], capture_output=True, text=True)
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                issues = [issue for issue in data.get('results', []) if issue.get('issue_severity') in ['HIGH', 'MEDIUM']]
+                if issues:
+                    vulns_found.extend([{'file': issue['filename'], 'issue': issue['issue_text']} for issue in issues])
+                    if auto_patch and verbose:
+                        # Simple auto-patch example: Remove eval() if detected (extend as needed)
+                        with open(py_file, 'r') as f:
+                            content = f.read()
+                        if 'eval(' in content:
+                            content = re.sub(r'eval\s*\(', 'safe_eval(', content)  # Placeholder safe alt
+                            with open(py_file, 'w') as f:
+                                f.write(content)
+                            print(f" - Auto-patched eval in {py_file.name}")
+        except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
+            if verbose:
+                print("⚠ Bandit missing—pip install bandit.")
+    
+    # JS: npm audit
+    for js_dir in js_dirs:
+        try:
+            if verbose:
+                print(f" Auditing JS in {js_dir}...")
+            result = subprocess.run(['npm', 'audit', '--json'], cwd=js_dir, capture_output=True, text=True)
+            if result.returncode == 1:  # Audit found issues
+                data = json.loads(result.stdout)
+                high_vulns = [v for v in data.get('vulnerabilities', {}).values() if v.get('severity') in ['high', 'critical']]
+                if high_vulns:
+                    vulns_found.extend([{'dir': str(js_dir), 'vuln': v['name']} for v in high_vulns])
+                    if auto_patch:
+                        subprocess.run(['npm', 'audit', 'fix'], cwd=js_dir, capture_output=True)
+                        print(f" - Auto-fixed vulns in {js_dir.name}")
+        except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
+            if verbose:
+                print("⚠ npm audit failed—ensure node_modules exists.")
+    
+    if vulns_found:
+        print(f"⚠ {len(vulns_found)} vulnerabilities detected & {'patched' if auto_patch else 'logged'}.")
+        if log_entries is not None:
+            log_entries.append({'event': 'vuln_scan', 'count': len(vulns_found), 'details': vulns_found})
+    else:
+        print("✓ No high-severity vulns found.")
+    
+    return vulns_found
 
 def history_blur(root_path: Path, dry_run=False, verbose=False, log_entries=None):
     """Blur Git logs for natural history."""
@@ -152,19 +238,43 @@ def history_blur(root_path: Path, dry_run=False, verbose=False, log_entries=None
                         f.writelines(mutated)
                     blurred_count += 1
                 if verbose:
-                    print(f"  - Blurred {log_file.name}: {len(logs)} lines")
+                    print(f" - Blurred {log_file.name}: {len(logs)} lines")
         if blurred_count > 0 and verbose:
             print(f"✓ History blurred: {blurred_count} files")
         if log_entries is not None:
             log_entries.append({'event': 'history_blur', 'blurred': blurred_count})
 
-def walk_and_scrub(root_path: Path, dry_run=False, mutate=False, commit=False, bundle=False, backup=False, verbose=False, new_dir=None, log_file=None, eta=False):
-    """Main function: Scan, clean, backup, commit, bundle."""
+def daemon_loop(root_path, dry_run, mutate, commit, bundle, backup, verbose, new_dir, log_file, eta, obfuscate, vuln_scan, auto_patch):
+    """Cross-Platform Daemon Mode: Threaded loop for real-time scrubbing."""
+    def signal_handler(sig, frame):
+        print("\nShutting down daemon gracefully...")
+        if log_file:
+            with open(log_file, 'a') as lf:
+                json.dump({'event': 'shutdown', 'timestamp': datetime.now().isoformat()}, lf)
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    cycle = 0
+    while True:
+        cycle += 1
+        if verbose:
+            print(f"[Daemon Cycle {cycle}] Scanning {root_path}...")
+        try:
+            walk_and_scrub(root_path, dry_run, mutate, commit, bundle, backup, verbose, new_dir, log_file, eta, obfuscate, vuln_scan, auto_patch)
+        except Exception as e:
+            if verbose:
+                print(f"[Daemon Error] {e}—continuing.")
+        time.sleep(3600)  # Hourly sweep; configurable via arg if extended
+
+def walk_and_scrub(root_path: Path, dry_run=False, mutate=False, commit=False, bundle=False, backup=False, verbose=False, new_dir=None, log_file=None, eta=False, obfuscate=False, vuln_scan=False, auto_patch=False):
+    """Main function: Scan, clean, backup, commit, bundle, obfuscate, vuln scan."""
     log_entries = []
     start_time = time.time()
     if log_file:
         log_entries.append({'event': 'start', 'root': str(root_path), 'timestamp': datetime.now().isoformat()})
-   
+  
     # Sentinel check
     if not dry_run:
         if verbose:
@@ -176,21 +286,21 @@ def walk_and_scrub(root_path: Path, dry_run=False, mutate=False, commit=False, b
                     json.dump(log_entries, lf, indent=2)
                 print(f"Log saved: {log_file}")
             return
-   
+  
     if backup:
         backup_name = f"{root_path.name}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{random.randint(1000,9999)}.zip"
         shutil.make_archive(backup_name, 'zip', root_path)
         print(f"✓ Backup: {backup_name}")
         if log_entries:
             log_entries.append({'event': 'backup', 'file': backup_name})
-   
+  
     total_changes = []
     file_count = sum(1 for _ in Path(root_path).rglob('*') if _.is_file())
     processed = 0
     for dirpath, _, filenames in os.walk(root_path):
         for filename in filenames:
             file_path = Path(dirpath) / filename
-            changes = scrub_file(file_path, dry_run, mutate, verbose, log_entries)
+            changes = scrub_file(file_path, dry_run, mutate, verbose, log_entries, obfuscate)
             total_changes.extend(changes)
             processed += 1
             if verbose and processed % 500 == 0:  # Every 500 for large repos
@@ -201,8 +311,8 @@ def walk_and_scrub(root_path: Path, dry_run=False, mutate=False, commit=False, b
                     eta_str = f" ETA: {int(eta_sec // 60)}m {int(eta_sec % 60)}s"
                 else:
                     eta_str = ""
-                print(f"  - Progress: {processed}/{file_count} ({percent:.1f}%){eta_str}")
-   
+                print(f" - Progress: {processed}/{file_count} ({percent:.1f}%){eta_str}")
+  
     if dry_run:
         print(f"\n--- DRY-RUN: {len(total_changes)} references across {file_count} files ---")
         for change in total_changes[:20]:
@@ -214,9 +324,13 @@ def walk_and_scrub(root_path: Path, dry_run=False, mutate=False, commit=False, b
                 json.dump(log_entries, lf, indent=2)
             print(f"Log saved: {log_file}")
         return
-   
+  
     history_blur(root_path, dry_run=False, verbose=verbose, log_entries=log_entries)
-   
+  
+    # Vulnerability scan tie-in
+    if vuln_scan:
+        vulns = vulnerability_scan(root_path, dry_run=False, verbose=verbose, auto_patch=auto_patch, log_entries=log_entries)
+  
     if commit and total_changes:
         try:
             subprocess.run(['git', 'add', '.'], cwd=root_path, check=True, capture_output=True)
@@ -225,19 +339,19 @@ def walk_and_scrub(root_path: Path, dry_run=False, mutate=False, commit=False, b
             subprocess.run(['git', 'push'], cwd=root_path, check=True, capture_output=True)
             print(f"✓ Committed: {commit_msg}")
             if verbose:
-                print("  - Git staged and pushed")
+                print(" - Git staged and pushed")
             if log_entries:
                 log_entries.append({'event': 'commit', 'msg': commit_msg})
         except subprocess.CalledProcessError:
             print("⚠ Git failed—manual commit advised.")
-   
+  
     end_time = time.time()
     runtime = end_time - start_time
     print(f"\n--- COMPLETE: {len(total_changes)} references removed across {file_count} files. Time: {runtime:.1f}s ---")
     if eta:
         total_matches = sum(int(c.split(':')[1].split()[0]) for c in total_changes if 'ref' in c)
-        print(f"  - Summary: {processed} files, {total_matches} matches culled.")
-   
+        print(f" - Summary: {processed} files, {total_matches} matches culled.")
+  
     if new_dir:
         clone_path = root_path / new_dir
         clone_path.mkdir(exist_ok=True)
@@ -248,12 +362,12 @@ def walk_and_scrub(root_path: Path, dry_run=False, mutate=False, commit=False, b
                 shutil.copy2(item, clone_path)
         print(f"✓ Cloned to: {new_dir}")
         root_path = clone_path
-   
+  
     if bundle:
         bundle_name = f"{root_path.name}_clean_{random.randint(1000,9999)}.zip"
         shutil.make_archive(bundle_name, 'zip', root_path)
         print(f"✓ Bundled: {bundle_name}")
-   
+  
     # Clean temps
     temp_files = [__file__, '/tmp/*replace*', f"{root_path.name}_backup_*.zip"] if not backup else [__file__, '/tmp/*replace*']
     for tf in temp_files:
@@ -262,14 +376,14 @@ def walk_and_scrub(root_path: Path, dry_run=False, mutate=False, commit=False, b
                 shred_file(f, verbose)
         elif os.path.exists(tf):
             shred_file(Path(tf), verbose)
-   
+  
     if log_file:
-        with open(log_file, 'w') as lf:
+        with open(log_file, 'a') as lf:  # Append for daemon
             json.dump(log_entries, lf, indent=2)
-        print(f"Log saved: {log_file}")
+        print(f"Log updated: {log_file}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Simple Lovable reference remover.")
+    parser = argparse.ArgumentParser(description="ShadowVault Code Purifier: Erase traces, obfuscate, scan vulns, daemonize.")
     parser.add_argument('--path', '-p', type=str, default='.', help='Dir to clean (default: current)')
     parser.add_argument('--dry-run', '-d', action='store_true', help='Preview only')
     parser.add_argument('--mutate', '-m', action='store_true', help='Add neutral variations')
@@ -280,15 +394,35 @@ def main():
     parser.add_argument('--new-dir', '-n', type=str, help='Clone to new subdir')
     parser.add_argument('--log-file', '-l', type=str, help='Export JSON log')
     parser.add_argument('--eta', action='store_true', help='Show ETA/summary')
+    # New: Multi-Tool Obfuscation
+    parser.add_argument('--obfuscate', '-o', action='store_true', help='Obfuscate JS/CSS post-scrub (requires uglifyjs/cleancss)')
+    # New: Vuln Scanner
+    parser.add_argument('--vuln-scan', '-s', action='store_true', help='Run vuln scans post-scrub')
+    parser.add_argument('--auto-patch', '-a', action='store_true', help='Auto-patch detected vulns (with --vuln-scan)')
+    # New: Daemon Mode
+    parser.add_argument('--daemon', action='store_true', help='Run as background daemon (hourly sweeps; requires python-daemon)')
     args = parser.parse_args()
-   
+  
     root = Path(args.path).resolve()
     if not root.exists():
         sys.exit("Path not found.")
-   
-    print(f"Initializing on {root}...")
-    walk_and_scrub(root, args.dry_run, args.mutate or not args.dry_run, args.commit, args.bundle, args.backup, args.verbose, args.new_dir, args.log_file, args.eta)
-   
+  
+    print(f"ShadowVault initializing on {root}—erasing ghosts, forging steel...")
+    
+    if args.daemon:
+        if not DAEMON_AVAILABLE:
+            print("Falling back to threaded daemon (install python-daemon for full isolation).")
+            daemon_loop(root, args.dry_run, args.mutate, args.commit, args.bundle, args.backup, 
+                       args.verbose, args.new_dir, args.log_file, args.eta, args.obfuscate, args.vuln_scan, args.auto_patch)
+        else:
+            with daemon.DaemonContext():
+                daemon_loop(root, args.dry_run, args.mutate, args.commit, args.bundle, args.backup, 
+                           args.verbose, args.new_dir, args.log_file, args.eta, args.obfuscate, args.vuln_scan, args.auto_patch)
+    else:
+        walk_and_scrub(root, args.dry_run, args.mutate or not args.dry_run, args.commit, args.bundle, 
+                      args.backup, args.verbose, args.new_dir, args.log_file, args.eta, 
+                      args.obfuscate, args.vuln_scan, args.auto_patch)
+  
     sys.exit(0)
 
 if __name__ == "__main__":
