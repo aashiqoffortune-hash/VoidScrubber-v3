@@ -31,7 +31,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(f'shadowvault_optimizer_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+        logging.FileHandler(f'repocleaner_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -58,6 +58,7 @@ def install_package(package, max_retries=3):
 # Ensure core deps with fallbacks
 tqdm_available = False
 yaml_available = False
+rich_available = False
 
 try:
     from tqdm import tqdm
@@ -75,6 +76,16 @@ except ImportError:
         import yaml
         yaml_available = True
 
+try:
+    from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, MofNCompleteColumn
+    from rich.console import Console
+    rich_available = True
+except ImportError:
+    if install_package('rich'):
+        from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, MofNCompleteColumn
+        from rich.console import Console
+        rich_available = True
+
 # Auto-install pytest if --test and not available
 def ensure_pytest():
     global PYTEST_AVAILABLE
@@ -86,16 +97,52 @@ def ensure_pytest():
             logger.warning("pytest unavailable - tests skipped. Run 'pip install pytest' manually.")
 
 def progress_bar(iterable, desc="", total=None, unit="item", disable=False):
-    """Fallback progress bar if tqdm unavailable."""
-    if tqdm_available:
-        return tqdm(iterable, desc=desc, total=total, unit=unit, disable=disable)
+    """Rich progress bar: Hypnotic emerald flow, fallback to tqdm/ANSI for unbreakable aesthetics."""
+    if disable:
+        return iterable
+    
+    if rich_available:
+        # Rich supremacy: Cyan desc, green bar, percentage pulse, ETA ghost - cyber velvet
+        console = Console(file=sys.stdout)
+        with Progress(
+            TextColumn("[bold cyan]{task.description}"),
+            BarColumn(bar_width=None, style="green", complete_style="bright_green"),
+            TextColumn("[progress.percentage]{task.percentage:>3.1f}%"),
+            MofNCompleteColumn(),
+            TimeRemainingColumn(),
+            console=console
+        ) as progress:
+            task = progress.add_task(f"[bold green]{desc}", total=total)
+            def rich_wrapped():
+                for item in iterable:
+                    progress.update(task, advance=1)
+                    yield item
+            return rich_wrapped()
+    elif tqdm_available:
+        # Tqdm fallback: Green tide, cyan rates - elegant reserve
+        return tqdm(
+            iterable, 
+            desc=desc, 
+            total=total, 
+            unit=unit, 
+            colour='GREEN',
+            bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]',
+            dynamic_ncols=True
+        )
     else:
-        class FallbackBar:
+        # ANSI abyss: Green sweeps, cyan whispers - no scars, pure flow
+        class AestheticFallbackBar:
             def __init__(self, iterable, **kwargs):
                 self.iterable = iterable
                 self.current = 0
                 self.total = total or len(iterable) if hasattr(iterable, '__len__') else None
-                logger.info(f"Starting {desc} ({self.total} {unit}s)")
+                self.desc = desc or "Processing"
+                self.unit = unit
+                green = '\033[92m'
+                cyan = '\033[96m'
+                reset = '\033[0m'
+                bold = '\033[1m'
+                logger.info(f"{cyan}{bold}{self.desc} initiated{reset} ({self.total} {self.unit}s)")
             
             def __iter__(self):
                 return self
@@ -106,10 +153,20 @@ def progress_bar(iterable, desc="", total=None, unit="item", disable=False):
                     self.current += 1
                     if self.total:
                         pct = (self.current / self.total) * 100
-                        logger.info(f"{desc}: {self.current}/{self.total} ({pct:.1f}%)")
+                        bar_width = 40
+                        filled = int(bar_width * self.current // self.total)
+                        bar = '\033[92m█' * filled + '\033[90m░' * (bar_width - filled) + '\033[0m'
+                        green = '\033[92m'
+                        cyan = '\033[96m'
+                        reset = '\033[0m'
+                        bold = '\033[1m'
+                        logger.info(f"{cyan}{bold}{self.desc}:{reset} {bar} {green}{self.current}/{self.total} ({pct:.1f}%){reset}")
                     return item
                 except StopIteration:
-                    logger.info(f"Completed {desc}")
+                    green = '\033[92m'
+                    reset = '\033[0m'
+                    bold = '\033[1m'
+                    logger.info(f"{green}{bold}Completed {self.desc}{reset}")
                     raise
             
             def update(self, n=1):
@@ -117,9 +174,12 @@ def progress_bar(iterable, desc="", total=None, unit="item", disable=False):
             
             def set_postfix(self, **kwargs):
                 if kwargs:
-                    logger.info(f"{desc} update: {kwargs}")
+                    cyan = '\033[96m'
+                    reset = '\033[0m'
+                    postfix_str = ' | '.join([f"{k}: {v}" for k, v in kwargs.items()])
+                    logger.info(f"{cyan}Update:{reset} {postfix_str}")
         
-        return FallbackBar(iterable, desc=desc)
+        return AestheticFallbackBar(iterable, desc=desc)
 
 # Atomic file write context manager
 @contextmanager
@@ -250,7 +310,8 @@ PATTERN_TO_TYPE = {
     'private_key': 'Private Key',
 }
 
-DECOYS = ["CustomBuild", "DevTool", "CodeHelper", "AnonEdit", "QuickGen", "UIHelper"]
+# DECOYS stubbed - unused for fixed phantom sig
+DECOYS = ["CustomBuild", "DevTool", "CodeHelper", "AnonEdit", "QuickGen", "UIHelper"]  # Legacy; ignore for void
 
 def safe_remove_file(fp: Path, max_retries=3):
     """Securely remove file with overwrite and retries."""
@@ -293,7 +354,7 @@ def enhance_gitignore(root_path: Path, log_entries=None):
     try:
         if not gitignore_path.exists():
             with atomic_write(gitignore_path, backup=False) as f:
-                f.write('# Enhanced security ignores by ShadowVault Optimizer\n')
+                f.write('# Enhanced security ignores by RepoCleaner\n')
                 f.write('\n'.join(common_ignores) + '\n')
             if log_entries is not None:
                 log_entries.append({'gitignore': 'created'})
@@ -307,7 +368,7 @@ def enhance_gitignore(root_path: Path, log_entries=None):
                     f.seek(0)
                     f.truncate()
                     f.write(content)
-                    f.write('\n# Additional security by ShadowVault\n')
+                    f.write('\n# Additional security by RepoCleaner\n')
                     f.write('\n'.join(missing) + '\n')
                 if log_entries is not None:
                     log_entries.append({'gitignore': 'enhanced', 'added': len(missing)})
@@ -505,7 +566,7 @@ def detailed_scan(root_path: Path, verbose=False, pattern_file=None):
         logger.info("No target files to analyze.")
         return False, detected, trace_locations
     
-    iterable = progress_bar(target_files, desc="Analyzing", total=file_count, unit="file", disable=not tqdm_available)
+    iterable = progress_bar(target_files, desc="Scanning", total=file_count, unit="file", disable=not rich_available and not tqdm_available)
     for file_path in iterable:
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -595,7 +656,7 @@ def main_cleanup(root_path: Path, dry_run=False, commit=True, bundle=False, back
     file_count = len(target_files)
     logger.info(f"Processing {file_count} target files...")
     all_changes = []
-    iterable = progress_bar(target_files, desc="Processing", total=file_count, unit="file", disable=not tqdm_available)
+    iterable = progress_bar(target_files, desc="Purging", total=file_count, unit="file", disable=not rich_available and not tqdm_available)
     
     for file_path in iterable:
         changes = clean_file(file_path, dry_run, verbose, log_entries, obfuscate)
@@ -603,7 +664,7 @@ def main_cleanup(root_path: Path, dry_run=False, commit=True, bundle=False, back
         if show_eta and len(all_changes) % 100 == 0:
             elapsed = time.time() - start_time
             rate = len(all_changes) / elapsed if elapsed > 0 else 0
-            remaining_files = file_count - iterable.n
+            remaining_files = file_count - (iterable.current if hasattr(iterable, 'current') else 0)  # Adapt for Rich/tqdm
             eta_seconds = remaining_files / rate if rate > 0 else 0
             eta_min = int(eta_seconds // 60)
             if hasattr(iterable, 'set_postfix'):
@@ -620,17 +681,17 @@ def main_cleanup(root_path: Path, dry_run=False, commit=True, bundle=False, back
     if not verification_passed:
         logger.warning("Cleanup verification failed - check logs for details.")
     
-    # Auto-commit with safe subprocess
+    # Auto-commit with fixed phantom sig - no decoys, pure void
     if commit and all_changes:
         git_env = os.environ.copy()
-        git_env['GIT_COMMITTER_NAME'] = DECOYS[random.randint(0, len(DECOYS)-1)]
-        git_env['GIT_COMMITTER_EMAIL'] = f"{git_env['GIT_COMMITTER_NAME']}@{random.choice(DECOYS)}.dev"
+        git_env['GIT_COMMITTER_NAME'] = "by"  # Fixed name for "by example@com" render
+        git_env['GIT_COMMITTER_EMAIL'] = "example@com"  # Fixed email - unresolvable ghost
         try:
             safe_subprocess_run(['git', 'add', '.'], cwd=root_path, timeout=30, env=git_env)
             commit_msg = f"chore: shadow optimizations ({random.randint(100,999)})"
             safe_subprocess_run(['git', 'commit', '-m', commit_msg], cwd=root_path, timeout=30, env=git_env)
             safe_subprocess_run(['git', 'push'], cwd=root_path, timeout=60, env=git_env)
-            logger.info(f"Committed and pushed: {commit_msg}")
+            logger.info(f"Committed and pushed as 'by <example@com>': {commit_msg}")
         except Exception as e:
             logger.warning(f"Git operations failed: {e} - Changes staged locally.")
     
@@ -674,7 +735,7 @@ def main_cleanup(root_path: Path, dry_run=False, commit=True, bundle=False, back
 
 def main():
     parser = argparse.ArgumentParser(
-        description="ShadowVault Repository Optimizer: Eradicate Lovable watermarks (priority) and all traces/secrets with unbreakable resilience.",
+        description="RepoCleaner: Eradicate Lovable watermarks (priority) and all traces/secrets with unbreakable resilience.",
         epilog="Engineered for zero-failure execution, total untraceability, and exponential stealth."
     )
     parser.add_argument('path', nargs='?', default='.', help='Target repository path (default: current dir)')
@@ -726,7 +787,7 @@ def main():
     # Auto-commit logic: only if not dry-run
     auto_commit = args.commit and not args.dry_run
     
-    logger.info("ShadowVault Optimizer activated - commencing untraceable purification...")
+    logger.info("RepoCleaner activated - commencing untraceable purification...")
     
     try:
         main_cleanup(
