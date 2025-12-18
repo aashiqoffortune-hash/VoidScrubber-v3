@@ -6,6 +6,6 @@ Hey fellow devs! This script's your quick-fix hero for scrubbing those pesky too
 - **Custom Forks**: Tailored patterns for Cursor, Replit, or Claude ghosts.
 - **Eternal Support**: Private Signal channel for tweaks + updates.
 
-– First 50 buyers get a free "reverse-purge" alibi tool. Questions? DM 
+– First 50 buyers get a free "reverse-purge" alibi tool. Questions? DM on instagram: @ram3ss3s
 
 *Built with ❤️ by indie devs, for indie devs. No strings, pure freedom.*
